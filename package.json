@@ -1,9 +1,8 @@
 {
   "name": "@lucasygu/lockedout",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Node CLI for LinkedIn — read profiles, posts, companies, jobs, and search via a stealth browser session.",
   "type": "module",
-  "main": "./dist/lib/client.js",
   "bin": {
     "lockedout": "dist/cli.js"
   },
@@ -19,6 +18,7 @@
     "dev": "tsc --watch",
     "prepublishOnly": "npm run build",
     "postinstall": "node scripts/postinstall.js",
+    "preuninstall": "node scripts/preuninstall.js",
     "start": "node dist/cli.js"
   },
   "engines": {

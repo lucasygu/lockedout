@@ -1,72 +1,294 @@
 #!/usr/bin/env node
 
 /**
- * lockedout — Node CLI for LinkedIn via persistent stealth browser session.
+ * lockedout — LinkedIn from the command line.
  *
  * Usage:
- *   lockedout login              # First-time browser login (5-min window for 2FA)
- *   lockedout status             # Check if session is alive
- *   lockedout logout             # Clear local session
- *   lockedout profile <user>     # Read a profile (slug or full URL)
+ *   lockedout login                     # Headed Chromium, 5-min window for 2FA/captcha
+ *   lockedout status [--json]           # Verify the persistent session is alive
+ *   lockedout logout                    # Clear ~/.lockedout/
+ *   lockedout profile <user> [opts]     # Scrape a profile via innerText
  */
 
 import { Command } from "commander";
-import { readFileSync } from "node:fs";
+import kleur from "kleur";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { loginCommand } from "./commands/login.js";
-import { statusCommand } from "./commands/status.js";
-import { logoutCommand } from "./commands/logout.js";
-import { profileCommand } from "./commands/profile.js";
+import { BrowserManager, withBrowser } from "./lib/browser.js";
+import { isLoggedIn, waitForManualLogin } from "./lib/auth.js";
+import { LinkedInExtractor } from "./lib/extractor.js";
+import { parsePersonSections, PERSON_SECTIONS } from "./lib/fields.js";
+import { LOCKEDOUT_HOME, PROFILE_DIR } from "./lib/paths.js";
+import { AuthenticationError, RateLimitError } from "./lib/utils.js";
+import {
+  checkDailyQuota,
+  clearCooldown,
+  getCooldownRemainingMs,
+  recordAction,
+  setCooldown,
+  summarizeUsage,
+} from "./lib/usage.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8"));
 
 const program = new Command();
-
 program
   .name("lockedout")
-  .description("LinkedIn from the command line — via a real persistent browser session.")
+  .description("LinkedIn from the command line — via a persistent stealth browser session.")
   .version(pkg.version);
+
+function output(data: unknown, json: boolean): void {
+  if (json) console.log(JSON.stringify(data, null, 2));
+  else console.log(data);
+}
+
+function handleError(err: unknown): never {
+  if (err instanceof AuthenticationError || err instanceof RateLimitError) {
+    setCooldown(30);
+    const label = err instanceof AuthenticationError ? "Auth" : "Rate limit";
+    const color = err instanceof AuthenticationError ? kleur.red : kleur.yellow;
+    console.error(color(`${label}: ${err.message}`));
+    console.error(
+      kleur.dim("Cooldown enabled (30 min). Override with: lockedout cooldown clear"),
+    );
+  } else if (err instanceof Error) {
+    console.error(kleur.red(`Error: ${err.message}`));
+  } else {
+    console.error(kleur.red("Unknown error"));
+  }
+  process.exit(1);
+}
+
+/** Refuse to run scrape commands while a cooldown is active. */
+function preflight(): void {
+  const remaining = getCooldownRemainingMs();
+  if (remaining <= 0) return;
+  const mins = Math.ceil(remaining / 60_000);
+  console.error(
+    kleur.yellow(`Cooldown active: ${mins} min remaining.`),
+    kleur.dim("Run: lockedout cooldown clear"),
+  );
+  process.exit(1);
+}
+
+function normalizeUsername(input: string): string {
+  const trimmed = input.trim();
+  const m = trimmed.match(/linkedin\.com\/in\/([^/?#]+)/i);
+  if (m) return decodeURIComponent(m[1]!);
+  return trimmed.replace(/^\/+|\/+$/g, "");
+}
+
+// ─── login ──────────────────────────────────────────────────────────────────
 
 program
   .command("login")
-  .description("Open a browser and log in to LinkedIn manually (cookies persist).")
+  .description("Open a Chromium window and sign in to LinkedIn manually (cookies persist).")
   .action(async () => {
-    await loginCommand();
+    console.log(kleur.cyan("Opening Chromium for LinkedIn login..."));
+    console.log(kleur.dim("You have 5 minutes to sign in (2FA / captcha OK)."));
+    console.log(kleur.dim("The window closes automatically once you reach the feed.\n"));
+    try {
+      await withBrowser(
+        async (page) => {
+          await page.goto("https://www.linkedin.com/login", {
+            waitUntil: "domcontentloaded",
+          });
+          await waitForManualLogin(page);
+          console.log(kleur.green("✓ Logged in. Session saved to ~/.lockedout/profile/"));
+        },
+        { headless: false },
+      );
+    } catch (err) {
+      handleError(err);
+    }
   });
+
+// ─── status ─────────────────────────────────────────────────────────────────
 
 program
   .command("status")
   .description("Check whether the local session is still logged in.")
   .option("--json", "Output as JSON")
   .action(async (opts) => {
-    await statusCommand(opts);
-  });
-
-program
-  .command("logout")
-  .description("Clear the local session.")
-  .action(async () => {
-    await logoutCommand();
-  });
-
-program
-  .command("profile <username>")
-  .description("Read a LinkedIn profile (slug like 'satyanadella' or a full /in/ URL).")
-  .option("--pretty", "Human-readable output")
-  .option("--json", "Pretty-print JSON")
-  .option("--max-scrolls <n>", "How many viewport-scrolls to load lazy sections (default 5)", (v) => parseInt(v, 10))
-  .action(async (username: string, opts) => {
+    if (!existsSync(PROFILE_DIR)) {
+      const out = { logged_in: false, message: "No profile yet. Run: lockedout login" };
+      if (opts.json) output(out, true);
+      else console.log(kleur.yellow(out.message));
+      process.exit(1);
+    }
     try {
-      await profileCommand(username, opts);
+      const result = await withBrowser(
+        async (page) => {
+          await page.goto("https://www.linkedin.com/feed/", {
+            waitUntil: "domcontentloaded",
+            timeout: 30000,
+          });
+          const ok = await isLoggedIn(page);
+          return { logged_in: ok, url: page.url() };
+        },
+        { headless: true },
+      );
+      if (opts.json) {
+        output(result, true);
+      } else if (result.logged_in) {
+        console.log(kleur.green("✓ Logged in"));
+      } else {
+        console.log(
+          kleur.yellow("✗ Not logged in"),
+          kleur.dim(`(redirected to ${result.url})`),
+        );
+        process.exit(1);
+      }
     } catch (err) {
-      console.error((err as Error).message);
-      process.exitCode = 1;
+      handleError(err);
     }
   });
 
-program.parseAsync().catch((err) => {
-  console.error(err);
-  process.exit(1);
+// ─── logout ─────────────────────────────────────────────────────────────────
+
+program
+  .command("logout")
+  .description("Delete the local session (clears ~/.lockedout/).")
+  .action(async () => {
+    if (!existsSync(LOCKEDOUT_HOME)) {
+      console.log(kleur.dim("Already logged out."));
+      return;
+    }
+    rmSync(LOCKEDOUT_HOME, { recursive: true, force: true });
+    console.log(kleur.green("✓ Cleared ~/.lockedout/"));
+  });
+
+// ─── profile ────────────────────────────────────────────────────────────────
+
+const profileCmd = program
+  .command("profile <username>")
+  .description("Scrape a LinkedIn profile (slug or full /in/<slug>/ URL).")
+  .option(
+    "--sections <list>",
+    `Comma-separated sections to fetch (default: main_profile only). Available: ${Object.keys(
+      PERSON_SECTIONS,
+    )
+      .filter((n) => !PERSON_SECTIONS[n]![1])
+      .join(", ")}`,
+  )
+  .option("--max-scrolls <n>", "Max scroll attempts per page (default 5)", (v) => parseInt(v, 10))
+  .option("--pretty", "Render readable text (default)")
+  .option("--json", "Output as JSON")
+  .option("--force", "Bypass the daily quota cap");
+
+profileCmd.action(async (username: string, opts) => {
+  try {
+    preflight();
+    const slug = normalizeUsername(username);
+    if (!slug) {
+      console.error(kleur.red("Username is required (slug or /in/ URL)."));
+      process.exit(1);
+    }
+
+    const quota = checkDailyQuota({ force: Boolean(opts.force) });
+    if (quota.blocked) {
+      console.error(kleur.yellow(quota.reason!));
+      process.exit(1);
+    }
+
+    const { requested, unknown } = parsePersonSections(opts.sections);
+    if (unknown.length > 0) {
+      console.error(
+        kleur.yellow(`Ignoring unknown sections: ${unknown.join(", ")}`),
+      );
+    }
+
+    recordAction("profile", slug);
+
+    const result = await withBrowser(
+      async (page) => {
+        const extractor = new LinkedInExtractor(page);
+        return extractor.scrapePerson(
+          slug,
+          requested,
+          typeof opts.maxScrolls === "number" ? opts.maxScrolls : null,
+        );
+      },
+      { headless: true },
+    );
+
+    if (opts.json) {
+      output(result, true);
+      return;
+    }
+
+    console.log(kleur.bold(result.url));
+    for (const [name, text] of Object.entries(result.sections)) {
+      console.log("");
+      console.log(kleur.cyan(`── ${name} ──`));
+      console.log(text);
+    }
+    if (result.section_errors) {
+      console.log("");
+      console.log(kleur.yellow("Errors:"));
+      for (const [name, err] of Object.entries(result.section_errors)) {
+        console.log(kleur.dim(`  ${name}: ${err.message}`));
+      }
+    }
+  } catch (err) {
+    handleError(err);
+  }
 });
+
+// ─── usage ──────────────────────────────────────────────────────────────────
+
+program
+  .command("usage")
+  .description("Show today's scrape count, daily cap, and cooldown status.")
+  .option("--json", "Output as JSON")
+  .action((opts) => {
+    const summary = summarizeUsage();
+    if (opts.json) {
+      output(summary, true);
+      return;
+    }
+    const remaining = summary.cap - summary.today_count;
+    console.log(
+      `${kleur.bold(`${summary.today_count}/${summary.cap}`)} actions today` +
+        (summary.is_warmup ? kleur.dim(" (first-14-days warm-up cap)") : ""),
+    );
+    console.log(kleur.dim(`Remaining: ${Math.max(0, remaining)}`));
+    if (summary.cooldown_remaining_minutes > 0) {
+      console.log(
+        kleur.yellow(`Cooldown: ${summary.cooldown_remaining_minutes} min remaining`),
+      );
+    }
+  });
+
+// ─── cooldown ───────────────────────────────────────────────────────────────
+
+const cooldownCmd = program.command("cooldown").description("Manage the rate-limit cooldown.");
+
+cooldownCmd
+  .command("status")
+  .description("Show remaining cooldown time.")
+  .action(() => {
+    const ms = getCooldownRemainingMs();
+    if (ms <= 0) {
+      console.log(kleur.green("✓ No active cooldown."));
+      return;
+    }
+    console.log(kleur.yellow(`Cooldown: ${Math.ceil(ms / 60_000)} min remaining`));
+  });
+
+cooldownCmd
+  .command("clear")
+  .description("Clear an active cooldown (use only if you know it was overcautious).")
+  .action(() => {
+    clearCooldown();
+    console.log(kleur.green("✓ Cooldown cleared."));
+  });
+
+program.parseAsync().catch((err) => {
+  handleError(err);
+});
+
+// Ensure no orphan browser processes if commander is invoked without a command.
+void BrowserManager;
