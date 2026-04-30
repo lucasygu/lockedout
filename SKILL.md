@@ -2,7 +2,7 @@
 description: Read LinkedIn profiles via a stealth Chromium session — with built-in jittered delays, daily quota, and cooldown safeguards. Use for "look up X on LinkedIn", "summarize this person's career", "compare these two profiles", and similar reads.
 allowed-tools: Bash, Read
 name: lockedout
-version: 0.3.0
+version: 0.3.1
 metadata:
   openclaw:
     requires:
