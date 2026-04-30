@@ -1,0 +1,56 @@
+{
+  "name": "@lucasygu/lockedout",
+  "version": "0.1.0",
+  "description": "Node CLI for LinkedIn — read profiles, posts, companies, jobs, and search via a stealth browser session.",
+  "type": "module",
+  "main": "./dist/lib/client.js",
+  "bin": {
+    "lockedout": "dist/cli.js"
+  },
+  "files": [
+    "dist/",
+    "scripts/",
+    "SKILL.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x dist/cli.js",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build",
+    "postinstall": "node scripts/postinstall.js",
+    "start": "node dist/cli.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "linkedin",
+    "linkedin-cli",
+    "scraper",
+    "patchright",
+    "playwright",
+    "cli",
+    "claude-code",
+    "claude-code-skill"
+  ],
+  "author": "lucasygu",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lucasygu/lockedout.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lucasygu/lockedout/issues"
+  },
+  "homepage": "https://github.com/lucasygu/lockedout#readme",
+  "dependencies": {
+    "commander": "^13.1.0",
+    "kleur": "^4.1.5",
+    "patchright": "^1.59.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}
