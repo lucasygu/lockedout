@@ -36,7 +36,13 @@ export async function ensureChromium(): Promise<void> {
   }
 }
 
-function chromiumLikelyInstalled(): boolean {
+export function chromiumCacheDir(): string {
+  const override = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  if (override && override !== "0") return override;
+  return defaultCacheDir();
+}
+
+export function chromiumLikelyInstalled(): boolean {
   const override = process.env.PLAYWRIGHT_BROWSERS_PATH;
 
   // In-tree mode — Patchright stores the browser inside node_modules. We

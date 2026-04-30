@@ -2,7 +2,7 @@
 description: Read LinkedIn profiles via a stealth Chromium session — with built-in jittered delays, daily quota, and cooldown safeguards. Use for "look up X on LinkedIn", "summarize this person's career", "compare these two profiles", and similar reads.
 allowed-tools: Bash, Read
 name: lockedout
-version: 0.3.1
+version: 0.3.2
 metadata:
   openclaw:
     requires:
@@ -33,6 +33,7 @@ Use the `lockedout` CLI to read LinkedIn profiles, posts, and recent activity fr
 | Verify session is alive | `lockedout status --json` |
 | Read a profile | `lockedout profile <slug-or-url> --json` |
 | Read with extra sections | `lockedout profile <slug> --sections experience,education --json` |
+| **Triage anything broken** | **`lockedout doctor --json`** |
 | See today's quota usage | `lockedout usage --json` |
 | Check / clear cooldown | `lockedout cooldown status` / `lockedout cooldown clear` |
 | Sign out / wipe profile | `lockedout logout` |
@@ -76,6 +77,16 @@ Scrape one LinkedIn person profile. The `<username>` argument accepts either a s
 | `--force` | Bypass the daily quota cap | false |
 
 **Available sections:** `main_profile`, `experience`, `education`, `interests`, `honors`, `languages`, `certifications`, `skills`, `projects`, `posts`. (`contact_info` exists but is overlay-only and not yet supported in v0.3.0.)
+
+### `doctor [--json] [--quick]`
+
+Run end-to-end self-checks: Node version, Patchright presence, Chromium cache, profile dir, session liveness (headless probe), daily quota, cooldown state, skill symlink, CLI version. Prints a green/yellow/red checklist or returns structured JSON.
+
+**Use this first when something is broken.** If `doctor` is all-green and a scrape still fails, the problem is on LinkedIn's side (rate limit, UI change, account flag) — not the skill. If `doctor` flags something, fix that first before opening an issue.
+
+`--quick` skips the headless session probe (saves ~5–10 s, no browser launch). Useful for a fast environment-only check; the session check still requires a real Chromium launch.
+
+Exit code: `0` if everything passed, `1` if any check failed or warned. Suitable for shell pipelines.
 
 ### `usage [--json]`
 
@@ -131,6 +142,28 @@ Print today's UTC scrape count, daily cap, warm-up status, and cooldown remainin
   "cooldown_remaining_minutes": 0
 }
 ```
+
+### `doctor --json`
+
+```json
+{
+  "cli_version": "0.3.2",
+  "ok": true,
+  "checks": [
+    { "name": "Node.js",       "status": "ok",   "detail": "24.9.0 (>= 22 required)" },
+    { "name": "Patchright",    "status": "ok",   "detail": "v1.59.4 installed" },
+    { "name": "Chromium",      "status": "ok",   "detail": "cached at ~/Library/Caches/ms-playwright" },
+    { "name": "Profile dir",   "status": "ok",   "detail": "/Users/.../.lockedout/profile" },
+    { "name": "Session",       "status": "ok",   "detail": "logged in (headless probe of /feed/ succeeded)" },
+    { "name": "Daily quota",   "status": "ok",   "detail": "3/50 (warm-up cap)" },
+    { "name": "Cooldown",      "status": "ok",   "detail": "none active" },
+    { "name": "Skill symlink", "status": "ok",   "detail": "~/.claude/skills/lockedout → ..." },
+    { "name": "CLI version",   "status": "ok",   "detail": "0.3.2" }
+  ]
+}
+```
+
+`status` is one of `ok`, `warn`, `fail`. `ok: false` if any check is non-`ok`.
 
 ---
 

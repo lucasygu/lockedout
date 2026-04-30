@@ -1,0 +1,77 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a report. Please run `lockedout doctor --json` and paste the output below — most "doesn't work" reports turn out to be environment issues that the doctor surfaces immediately. Filling this in honestly helps triage hugely.
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: lockedout doctor --json
+      description: Paste the full JSON output. If the command itself fails, paste the error.
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you run? What did you expect? What did you get?
+      placeholder: |
+        I ran `lockedout profile someone --sections experience,education --json`
+        I expected JSON with two sections.
+        I got an empty `sections` object and `{ "section_errors": { ... } }`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands, in order. Redact usernames if needed.
+      placeholder: |
+        1. lockedout login
+        2. lockedout profile <slug> --json
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: package-version
+    attributes:
+      label: Package version
+      description: Output of `lockedout --version`
+      placeholder: 0.3.2
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      description: macOS / Linux / Windows + version
+      placeholder: macOS 15.5 (arm64)
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Logs, screenshots, network conditions, anything that might matter.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I ran `lockedout doctor` and read the output before filing this
+          required: true
+        - label: I'm not running this against an account I can't afford to lose
+          required: true

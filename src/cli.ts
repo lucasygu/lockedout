@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { BrowserManager, withBrowser } from "./lib/browser.js";
 import { isLoggedIn, waitForManualLogin } from "./lib/auth.js";
 import { ensureChromium } from "./lib/install.js";
+import { renderDoctorReport, runDoctor } from "./lib/doctor.js";
 import { LinkedInExtractor } from "./lib/extractor.js";
 import { parsePersonSections, PERSON_SECTIONS } from "./lib/fields.js";
 import { LOCKEDOUT_HOME, PROFILE_DIR } from "./lib/paths.js";
@@ -240,6 +241,32 @@ profileCmd.action(async (username: string, opts) => {
     handleError(err);
   }
 });
+
+// ─── doctor ─────────────────────────────────────────────────────────────────
+
+program
+  .command("doctor")
+  .description(
+    "Run end-to-end self-checks: Node, Patchright, Chromium, profile, session, quota, cooldown, skill symlink.",
+  )
+  .option("--json", "Output as JSON")
+  .option("--quick", "Skip the headless session probe (faster, no browser launch)")
+  .action(async (opts) => {
+    const report = await runDoctor({ quick: Boolean(opts.quick) });
+    if (opts.json) {
+      output(report, true);
+    } else {
+      console.log(renderDoctorReport(report));
+      console.log("");
+      if (report.ok) {
+        console.log(kleur.green("✓ All checks passed."));
+      } else {
+        const failed = report.checks.filter((c) => c.status !== "ok").length;
+        console.log(kleur.yellow(`⚠ ${failed} check(s) need attention.`));
+      }
+    }
+    process.exit(report.ok ? 0 : 1);
+  });
 
 // ─── usage ──────────────────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 {
   "name": "@lucasygu/lockedout",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Node CLI for LinkedIn — read profiles, posts, companies, jobs, and search via a stealth browser session.",
   "type": "module",
   "bin": {
