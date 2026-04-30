@@ -51,6 +51,9 @@ lockedout profile satyanadella --sections experience,education,skills --json
 # See today's quota usage
 lockedout usage
 
+# When something breaks — run this first
+lockedout doctor
+
 # Check / clear cooldown
 lockedout cooldown status
 lockedout cooldown clear
@@ -64,6 +67,7 @@ lockedout cooldown clear
 | `status` | Headless probe that checks if the saved session is still valid. |
 | `logout` | Wipe the local session (`rm -rf ~/.lockedout/`). |
 | `profile <username>` | Scrape a person profile. Accepts a slug (`satyanadella`) or full URL. |
+| `doctor` | End-to-end self-diagnostic — run this first when something breaks. Supports `--json` and `--quick`. |
 | `usage` | Show today's scrape count, daily cap, and cooldown status. |
 | `cooldown status` | Show remaining cooldown time. |
 | `cooldown clear` | Clear an active cooldown (use only if you're confident it was overcautious). |
@@ -84,8 +88,11 @@ lockedout cooldown clear
 
 ## Troubleshooting
 
+**Always start with:** `lockedout doctor` (or `lockedout doctor --json` for tooling). It runs 8 checks across Node, Patchright, Chromium, profile, session, quota, cooldown, and the skill symlink — most "doesn't work" reports resolve at this step. If `doctor` is green and a scrape still fails, the problem is on LinkedIn's side, not the skill.
+
 | Problem | Solution |
 |---|---|
+| Anything unexpected — *start here* | `lockedout doctor` |
 | `Auth: LinkedIn requires interactive re-authentication` | Run `lockedout login`. A 30-min cooldown will auto-engage; `lockedout cooldown clear` after re-login if you want to scrape immediately. |
 | `Cooldown active: N min remaining` | Wait it out, or `lockedout cooldown clear` if the trigger was a known false positive. |
 | `Daily cap reached: N/N. Resets in ~Xh` | Wait for UTC reset, or use `--force` for one more scrape if needed. |

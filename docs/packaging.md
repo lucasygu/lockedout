@@ -300,3 +300,79 @@ If all green: actual publish via the **npm-publish-cli agent** (per global rule:
 - **Chinese README mirror** — defer; LinkedIn audience is global-English.
 - **Programmatic API exports** — defer; only consumer is the CLI itself. Add when there's a second consumer.
 - **Multi-arch Chromium pinning** — Patchright handles macOS-arm64 / macOS-x64 / Linux / Windows transparently. We don't need to pin.
+
+---
+
+## Release history (post-publish)
+
+The plan above worked, but reality added two surprises that future maintainers should know about. Both are fixed in `main`.
+
+### v0.3.0 — first publish, manual
+
+OIDC trusted publishing has a chicken-and-egg problem for first releases. The npmjs.com "Add trusted publisher" page only appears for packages that already exist on npm. We tried tag-triggered CI publish first; it failed with `ENEEDAUTH` because no trusted publisher was registered yet.
+
+**The unblock:** one-time `npm publish --access public` from the maintainer's laptop (with explicit user authorization, since this violates the repo's "no local publish" rule). Then visit the package's "Trusted publishers" settings on npmjs.com and register the GitHub repo + workflow. After that, all future tag pushes publish via OIDC with no token.
+
+The artifacts: `lucasygu-lockedout-0.3.0.tgz` published manually 2026-04-30; OIDC trusted publisher configured immediately afterward; v0.3.1 was the first release through the automated pipeline.
+
+### v0.3.1 — first automated publish, with one CI bug
+
+The publish step succeeded via OIDC, but the workflow's `Get version` step had a YAML/bash escaping bug:
+
+```yaml
+# BROKEN — \" gets passed literally to bash
+run: echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+```
+
+Bash exit 2: `syntax error near unexpected token '('`. The step's output was never used downstream — `Create GitHub Release` already reads `${{ github.ref_name }}` directly — so the entire `Get version` step was dead code. We removed it in `b071dff` (commit on main). Future workflows: don't write derived metadata as run steps when GitHub already exposes it natively.
+
+### v0.3.2 — first fully clean release
+
+Tag → CI → OIDC publish → GitHub Release auto-created. Total time tag-push to npm: ~30 seconds. Total tokens or secrets in the workflow: zero.
+
+## Working release recipe (current)
+
+```bash
+# Bump version in BOTH:
+#   package.json "version"
+#   SKILL.md frontmatter "version:"
+
+git add -A
+git commit -m "chore: release vX.Y.Z"
+git push origin main
+
+git tag vX.Y.Z
+git push origin vX.Y.Z
+
+# CI takes over: build → npm publish (OIDC) → GitHub Release.
+# Watch:
+gh run watch --repo lucasygu/lockedout --exit-status
+```
+
+If CI fails on the publish step:
+1. Check `gh run view <run-id> --log-failed` for the actual error
+2. If it's `ENEEDAUTH`: trusted publisher entry on npmjs.com was deleted or scope changed. Re-register at `https://www.npmjs.com/package/@lucasygu/lockedout/access`.
+3. If it's a build error: fix locally, commit, **delete the failed tag** (`git tag -d vX.Y.Z && git push --delete origin vX.Y.Z`), retag, push.
+4. **Never** fall back to local `npm publish` to "unstick" a failed CI run — it lets prod publish from an unverified machine.
+
+## OIDC trusted publishing — operational facts
+
+- Workflow file path matters: npmjs.com's trusted publisher entry pins to a specific file path (`.github/workflows/npm-publish.yml`). Renaming the file silently breaks publish.
+- Workflow needs `permissions: id-token: write` on the publish job. Without it, npm gets no OIDC token and falls back to anonymous (which fails for scoped packages).
+- npm CLI version matters: `npm@11.5.1+` is required for OIDC publish to work. We pin explicitly via `npm install -g npm@11.5.1` before `npm publish`. Don't trust the GitHub runner default — it lags.
+- GitHub Releases require `permissions: contents: write` on the publish job. Already set.
+- Publishing fails silently for scoped packages without `--access public` on first publish only. After the package exists with public access, the flag is redundant but doesn't hurt.
+
+## Diagnostic command — `lockedout doctor`
+
+Added in v0.3.2. Runs end-to-end self-checks: Node version, Patchright presence, Chromium cache, profile dir, session liveness, daily quota, cooldown state, skill symlink, CLI version. Implementation in `src/lib/doctor.ts`.
+
+**Why it matters for releases:** when a user reports "it doesn't work", the first response is "paste `lockedout doctor --json`". This filters environment issues out of bug reports. The `.github/ISSUE_TEMPLATE/bug.yml` requires that field.
+
+If `doctor` is all green and the user still has a problem → it's almost always LinkedIn-side (rate limit, UI change, account flag), not our skill. We can suggest they wait it out rather than open an issue.
+
+## What's deliberately missing
+
+- **CHANGELOG.md** — GitHub Releases auto-generate notes from commits; a separate file would just duplicate that. If we ever want hand-written release notes, add one then.
+- **Pre-release / RC channels** — npm's `dist-tags` support `next`, `beta`, etc. Not needed at this volume; revisit if we ever need a soak window before stable.
+- **Provenance attestations** — npm's `--provenance` flag is the next OIDC layer. Not yet on; add via a single workflow line when we want supply-chain attestation.
