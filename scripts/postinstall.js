@@ -24,10 +24,18 @@ function setupClaudeSkill() {
       mkdirSync(SKILL_DIR, { recursive: true });
     }
 
-    if (existsSync(SKILL_LINK)) {
+    // existsSync returns false on dangling symlinks, so prefer lstatSync
+    // (which inspects the link itself) to detect any prior install state.
+    let priorState = null;
+    try {
+      priorState = lstatSync(SKILL_LINK);
+    } catch {
+      // Path doesn't exist — clean state.
+    }
+
+    if (priorState) {
       try {
-        const stats = lstatSync(SKILL_LINK);
-        if (stats.isSymbolicLink()) {
+        if (priorState.isSymbolicLink()) {
           const currentTarget = readlinkSync(SKILL_LINK);
           if (currentTarget === PACKAGE_ROOT) {
             console.log("[lockedout] Claude Code skill already configured.");

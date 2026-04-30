@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { BrowserManager, withBrowser } from "./lib/browser.js";
 import { isLoggedIn, waitForManualLogin } from "./lib/auth.js";
+import { ensureChromium } from "./lib/install.js";
 import { LinkedInExtractor } from "./lib/extractor.js";
 import { parsePersonSections, PERSON_SECTIONS } from "./lib/fields.js";
 import { LOCKEDOUT_HOME, PROFILE_DIR } from "./lib/paths.js";
@@ -86,10 +87,11 @@ program
   .command("login")
   .description("Open a Chromium window and sign in to LinkedIn manually (cookies persist).")
   .action(async () => {
-    console.log(kleur.cyan("Opening Chromium for LinkedIn login..."));
-    console.log(kleur.dim("You have 5 minutes to sign in (2FA / captcha OK)."));
-    console.log(kleur.dim("The window closes automatically once you reach the feed.\n"));
     try {
+      await ensureChromium();
+      console.log(kleur.cyan("Opening Chromium for LinkedIn login..."));
+      console.log(kleur.dim("You have 5 minutes to sign in (2FA / captcha OK)."));
+      console.log(kleur.dim("The window closes automatically once you reach the feed.\n"));
       await withBrowser(
         async (page) => {
           await page.goto("https://www.linkedin.com/login", {
@@ -119,6 +121,7 @@ program
       process.exit(1);
     }
     try {
+      await ensureChromium();
       const result = await withBrowser(
         async (page) => {
           await page.goto("https://www.linkedin.com/feed/", {
@@ -181,6 +184,7 @@ const profileCmd = program
 profileCmd.action(async (username: string, opts) => {
   try {
     preflight();
+    await ensureChromium();
     const slug = normalizeUsername(username);
     if (!slug) {
       console.error(kleur.red("Username is required (slug or /in/ URL)."));
