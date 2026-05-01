@@ -22,7 +22,7 @@ import { renderDoctorReport, runDoctor } from "./lib/doctor.js";
 import { LinkedInExtractor } from "./lib/extractor.js";
 import { parsePersonSections, PERSON_SECTIONS } from "./lib/fields.js";
 import { LOCKEDOUT_HOME, PROFILE_DIR } from "./lib/paths.js";
-import { AuthenticationError, RateLimitError } from "./lib/utils.js";
+import { AuthenticationError, RateLimitError, isOffHoursLocal } from "./lib/utils.js";
 import {
   checkDailyQuota,
   clearCooldown,
@@ -75,6 +75,15 @@ function preflight(): void {
   process.exit(1);
 }
 
+/** Warn (don't block) when scraping in the local off-hours band [00:00, 06:00). */
+function warnIfOffHours(): void {
+  if (!isOffHoursLocal()) return;
+  console.error(
+    kleur.yellow("⚠ Off-hours activity (00:00–06:00 local)."),
+    kleur.dim("LinkedIn flags activity outside an account's normal active hours — consider waiting."),
+  );
+}
+
 function normalizeUsername(input: string): string {
   const trimmed = input.trim();
   const m = trimmed.match(/linkedin\.com\/in\/([^/?#]+)/i);
@@ -89,6 +98,7 @@ program
   .description("Open a Chromium window and sign in to LinkedIn manually (cookies persist).")
   .action(async () => {
     try {
+      warnIfOffHours();
       await ensureChromium();
       console.log(kleur.cyan("Opening Chromium for LinkedIn login..."));
       console.log(kleur.dim("You have 5 minutes to sign in (2FA / captcha OK)."));
@@ -101,7 +111,7 @@ program
           await waitForManualLogin(page);
           console.log(kleur.green("✓ Logged in. Session saved to ~/.lockedout/profile/"));
         },
-        { headless: false },
+        { headless: false, warmUp: true },
       );
     } catch (err) {
       handleError(err);
@@ -185,6 +195,7 @@ const profileCmd = program
 profileCmd.action(async (username: string, opts) => {
   try {
     preflight();
+    warnIfOffHours();
     await ensureChromium();
     const slug = normalizeUsername(username);
     if (!slug) {
@@ -216,7 +227,7 @@ profileCmd.action(async (username: string, opts) => {
           typeof opts.maxScrolls === "number" ? opts.maxScrolls : null,
         );
       },
-      { headless: true },
+      { headless: true, warmUp: true },
     );
 
     if (opts.json) {

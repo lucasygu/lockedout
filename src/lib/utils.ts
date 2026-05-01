@@ -34,6 +34,43 @@ export function jitterMs(minMs: number, maxMs: number): number {
 export const sleepJitter = (minMs: number, maxMs: number) => sleep(jitterMs(minMs, maxMs));
 
 /**
+ * Warm-up domains visited before the first LinkedIn navigation in a session.
+ * Mirrors stickerdaniel's `warm_up_browser`. Visiting a non-LinkedIn site first
+ * mimics a user who arrived from a search result, instead of one whose browser
+ * cold-starts straight into linkedin.com.
+ */
+export const WARM_UP_DOMAINS = [
+  "https://www.google.com",
+  "https://www.wikipedia.org",
+  "https://www.github.com",
+] as const;
+
+/** Pick one warm-up domain at random, navigate, pause briefly. Failures are silent. */
+export async function warmUpNavigation(
+  page: import("patchright").Page,
+  pauseRangeMs: readonly [number, number] = [500, 1500],
+): Promise<void> {
+  const url = WARM_UP_DOMAINS[Math.floor(Math.random() * WARM_UP_DOMAINS.length)]!;
+  try {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 10_000 });
+    await sleepJitter(pauseRangeMs[0], pauseRangeMs[1]);
+  } catch {
+    // Warm-up is best-effort; offline or DNS issues should not block real work.
+  }
+}
+
+/**
+ * Activity-hours guard. Returns whether the current local hour falls in the
+ * "off-hours" band [00:00, 06:00). Off-hours bursts are a documented LinkedIn
+ * detection signal (top-5 per the rate-limit research). Caller decides whether
+ * to warn or block — we default to warn-don't-block.
+ */
+export function isOffHoursLocal(now: Date = new Date()): boolean {
+  const h = now.getHours();
+  return h >= 0 && h < 6;
+}
+
+/**
  * Detect rate-limit / security challenge. Mirrors core/utils.py:detect_rate_limit.
  * Throws RateLimitError on /checkpoint or /authwall, or on error-shaped pages
  * (no <main>, body text < 2000 chars) containing throttle phrases.

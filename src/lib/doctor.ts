@@ -7,6 +7,7 @@ import { withBrowser } from "./browser.js";
 import { chromiumCacheDir, chromiumLikelyInstalled } from "./install.js";
 import { LOCKEDOUT_HOME, PROFILE_DIR } from "./paths.js";
 import { getCooldownRemainingMs, summarizeUsage } from "./usage.js";
+import { isOffHoursLocal } from "./utils.js";
 
 export type CheckStatus = "ok" | "warn" | "fail";
 
@@ -187,6 +188,20 @@ function checkCliVersion(): CheckResult {
   return ok("CLI version", ourVersion());
 }
 
+function checkActivityHours(): CheckResult {
+  const now = new Date();
+  const hour = now.getHours();
+  const hh = String(hour).padStart(2, "0");
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  if (isOffHoursLocal(now)) {
+    return warn(
+      "Activity hours",
+      `${hh}:${mm} local — off-hours band (00:00–06:00) is a LinkedIn detection signal`,
+    );
+  }
+  return ok("Activity hours", `${hh}:${mm} local — within normal band`);
+}
+
 const STATUS_GLYPH: Record<CheckStatus, string> = {
   ok: "✓",
   warn: "⚠",
@@ -201,7 +216,13 @@ export async function runDoctor(opts: { quick?: boolean } = {}): Promise<DoctorR
     checkProfileDir(),
   ];
   if (!opts.quick) checks.push(await checkSession());
-  checks.push(checkQuota(), checkCooldown(), checkSkillSymlink(), checkCliVersion());
+  checks.push(
+    checkQuota(),
+    checkCooldown(),
+    checkActivityHours(),
+    checkSkillSymlink(),
+    checkCliVersion(),
+  );
   const okAll = checks.every((c) => c.status === "ok");
   return { cli_version: ourVersion(), checks, ok: okAll };
 }

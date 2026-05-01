@@ -2,12 +2,19 @@ import { mkdirSync, chmodSync, existsSync, writeFileSync, readFileSync } from "n
 import { dirname } from "node:path";
 import { chromium, type BrowserContext, type Page } from "patchright";
 import { LOCKEDOUT_HOME, PROFILE_DIR, COOKIES_FILE } from "./paths.js";
+import { warmUpNavigation } from "./utils.js";
 
 export interface BrowserOptions {
   headless?: boolean;
   slowMo?: number;
   viewport?: { width: number; height: number };
   userAgent?: string;
+  /**
+   * If true, navigate to a random non-LinkedIn warm-up domain before the
+   * caller's first goto. Mimics arriving from a search result rather than
+   * cold-starting straight into linkedin.com. Best-effort; never throws.
+   */
+  warmUp?: boolean;
 }
 
 const PRIVATE_DIR_MODE = 0o700;
@@ -41,6 +48,7 @@ export class BrowserManager {
 
   private context: BrowserContext | null = null;
   private page: Page | null = null;
+  private readonly warmUp: boolean;
 
   constructor(opts: BrowserOptions = {}) {
     this.userDataDir = PROFILE_DIR;
@@ -48,6 +56,7 @@ export class BrowserManager {
     this.slowMo = opts.slowMo ?? 0;
     this.viewport = opts.viewport ?? { width: 1280, height: 720 };
     this.userAgent = opts.userAgent;
+    this.warmUp = opts.warmUp ?? false;
   }
 
   async start(): Promise<void> {
@@ -65,6 +74,10 @@ export class BrowserManager {
 
     const pages = this.context.pages();
     this.page = pages[0] ?? (await this.context.newPage());
+
+    if (this.warmUp) {
+      await warmUpNavigation(this.page);
+    }
   }
 
   async close(): Promise<void> {

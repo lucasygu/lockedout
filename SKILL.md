@@ -1,5 +1,5 @@
 ---
-description: Read LinkedIn profiles via a stealth Chromium session — with built-in jittered delays, daily quota, and cooldown safeguards. Use for "look up X on LinkedIn", "summarize this person's career", "compare these two profiles", and similar reads.
+description: Read LinkedIn profiles via a stealth Chromium session — with built-in jittered delays, daily quota, cooldown, warm-up navigation, and off-hours guard. Use for "look up X on LinkedIn", "summarize this person's career", "compare these two profiles", and similar reads.
 allowed-tools: Bash, Read
 name: lockedout
 version: 0.3.2
@@ -157,8 +157,9 @@ Print today's UTC scrape count, daily cap, warm-up status, and cooldown remainin
     { "name": "Session",       "status": "ok",   "detail": "logged in (headless probe of /feed/ succeeded)" },
     { "name": "Daily quota",   "status": "ok",   "detail": "3/50 (warm-up cap)" },
     { "name": "Cooldown",      "status": "ok",   "detail": "none active" },
+    { "name": "Activity hours","status": "ok",   "detail": "14:32 local — within normal band" },
     { "name": "Skill symlink", "status": "ok",   "detail": "~/.claude/skills/lockedout → ..." },
-    { "name": "CLI version",   "status": "ok",   "detail": "0.3.2" }
+    { "name": "CLI version",   "status": "ok",   "detail": "0.3.3" }
   ]
 }
 ```
@@ -169,7 +170,7 @@ Print today's UTC scrape count, daily cap, warm-up status, and cooldown remainin
 
 ## Rate-Limit Discipline
 
-LinkedIn detects automation **behaviorally**, not by hard request counts. The single biggest detection signal is uniform timing between actions. lockedout addresses this with three layered guards:
+LinkedIn detects automation **behaviorally**, not by hard request counts. The single biggest detection signal is uniform timing between actions. lockedout addresses this with five layered guards:
 
 ### 1. Jittered delays (built-in, always on)
 
@@ -201,6 +202,16 @@ When the cap is hit, `lockedout profile` refuses to run with a clear error and a
 On any `RateLimitError` (LinkedIn returned `/checkpoint`, `/authwall`, or rate-limit text) or `AuthenticationError` (session burned mid-scrape), lockedout sets a 30-minute cooldown. While the cooldown is active, all scrape commands refuse to run.
 
 Use `lockedout cooldown status` to check remaining time, `lockedout cooldown clear` to escape.
+
+### 4. Warm-up navigation (built-in, scrape commands only)
+
+Before the first LinkedIn navigation in a `profile` or `login` invocation, lockedout silently visits one of `{google.com, wikipedia.org, github.com}` (random pick) and pauses 0.5–1.5 s. This mimics a user arriving from a search result rather than a browser cold-starting straight into linkedin.com. `status` and `doctor`'s session probe skip the warm-up — they're maintenance pings, not scrapes.
+
+The warm-up is best-effort. If the warm-up domain fails to load (offline, DNS), the scrape still proceeds.
+
+### 5. Activity-hours guard (warning, not block)
+
+Activity outside an account's normal active hours is a documented top-5 LinkedIn detection signal. When a `profile` or `login` is invoked between **00:00 and 06:00 local time**, lockedout prints a warning and proceeds. `lockedout doctor` surfaces the same signal as a `warn` check. To silence: run during normal hours, or accept the risk and continue.
 
 ### When to use `--force`
 
