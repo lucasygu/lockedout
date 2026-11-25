@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { isLoggedIn } from "./auth.js";
 import { withBrowser } from "./browser.js";
 import { chromiumCacheDir, chromiumLikelyInstalled } from "./install.js";
-import { LOCKEDOUT_HOME, PROFILE_DIR } from "./paths.js";
+import { commandForProfile, defaultProfile, type ProfilePaths } from "./paths.js";
 import { getCooldownRemainingMs, summarizeUsage } from "./usage.js";
 import { isOffHoursLocal } from "./utils.js";
 
@@ -80,44 +80,43 @@ function checkPatchright(): CheckResult {
     : fail("Patchright", "Not found in node_modules — try reinstalling the package");
 }
 
-function checkChromium(): CheckResult {
+function checkChromium(profile: ProfilePaths): CheckResult {
   const cacheDir = chromiumCacheDir();
+  const login = commandForProfile(profile, "login");
   if (process.env.PLAYWRIGHT_BROWSERS_PATH === "0") {
     return ok("Chromium", "in-tree mode (PLAYWRIGHT_BROWSERS_PATH=0)");
   }
   if (!existsSync(cacheDir)) {
     return warn(
       "Chromium",
-      `Cache dir not found: ${cacheDir}. Run 'lockedout login' to download.`,
+      `Cache dir not found: ${cacheDir}. Run '${login}' to download.`,
     );
   }
   if (!chromiumLikelyInstalled()) {
     return warn(
       "Chromium",
-      `No chromium-* dir in ${cacheDir}. Run 'lockedout login' to download.`,
+      `No chromium-* dir in ${cacheDir}. Run '${login}' to download.`,
     );
   }
   return ok("Chromium", `cached at ${cacheDir}`);
 }
 
-function checkProfileDir(): CheckResult {
-  if (!existsSync(LOCKEDOUT_HOME)) {
-    return warn("Profile dir", `${LOCKEDOUT_HOME} does not exist — run 'lockedout login'`);
-  }
-  if (!existsSync(PROFILE_DIR)) {
+function checkProfileDir(profile: ProfilePaths): CheckResult {
+  if (!existsSync(profile.browserDir)) {
     return warn(
       "Profile dir",
-      `${PROFILE_DIR} does not exist — run 'lockedout login'`,
+      `${profile.browserDir} does not exist — run '${commandForProfile(profile, "login")}'`,
     );
   }
-  return ok("Profile dir", PROFILE_DIR);
+  return ok("Profile dir", profile.browserDir);
 }
 
-async function checkSession(): Promise<CheckResult> {
-  if (!existsSync(PROFILE_DIR)) {
+async function checkSession(profile: ProfilePaths): Promise<CheckResult> {
+  const login = commandForProfile(profile, "login");
+  if (!existsSync(profile.browserDir)) {
     return warn(
       "Session",
-      "No profile yet — run 'lockedout login' (skipped, headless probe needs a profile)",
+      `No profile yet — run '${login}' (skipped, headless probe needs a profile)`,
     );
   }
   try {
@@ -129,11 +128,11 @@ async function checkSession(): Promise<CheckResult> {
         });
         return await isLoggedIn(page);
       },
-      { headless: true },
+      { headless: true, profile },
     );
     return result
       ? ok("Session", "logged in (headless probe of /feed/ succeeded)")
-      : fail("Session", "Not logged in — run 'lockedout login'");
+      : fail("Session", `Not logged in — run '${login}'`);
   } catch (err) {
     return fail(
       "Session",
@@ -142,19 +141,20 @@ async function checkSession(): Promise<CheckResult> {
   }
 }
 
-function checkQuota(): CheckResult {
-  const s = summarizeUsage();
+function checkQuota(profile: ProfilePaths): CheckResult {
+  const s = summarizeUsage(profile);
   const tag = s.is_warmup ? " (warm-up cap)" : "";
   return s.today_count >= s.cap
     ? warn("Daily quota", `${s.today_count}/${s.cap} — cap reached${tag}`)
     : ok("Daily quota", `${s.today_count}/${s.cap}${tag}`);
 }
 
-function checkCooldown(): CheckResult {
-  const ms = getCooldownRemainingMs();
+function checkCooldown(profile: ProfilePaths): CheckResult {
+  const ms = getCooldownRemainingMs(profile);
   if (ms <= 0) return ok("Cooldown", "none active");
   const mins = Math.ceil(ms / 60_000);
-  return warn("Cooldown", `${mins} min remaining — run 'lockedout cooldown clear' if intentional`);
+  const clear = commandForProfile(profile, "cooldown clear");
+  return warn("Cooldown", `${mins} min remaining — run '${clear}' if intentional`);
 }
 
 function checkSkillSymlink(): CheckResult {
@@ -208,17 +208,19 @@ const STATUS_GLYPH: Record<CheckStatus, string> = {
   fail: "✗",
 };
 
-export async function runDoctor(opts: { quick?: boolean } = {}): Promise<DoctorReport> {
+export async function runDoctor(
+  { quick, profile = defaultProfile }: { quick?: boolean; profile?: ProfilePaths } = {},
+): Promise<DoctorReport> {
   const checks: CheckResult[] = [
     checkNode(),
     checkPatchright(),
-    checkChromium(),
-    checkProfileDir(),
+    checkChromium(profile),
+    checkProfileDir(profile),
   ];
-  if (!opts.quick) checks.push(await checkSession());
+  if (!quick) checks.push(await checkSession(profile));
   checks.push(
-    checkQuota(),
-    checkCooldown(),
+    checkQuota(profile),
+    checkCooldown(profile),
     checkActivityHours(),
     checkSkillSymlink(),
     checkCliVersion(),

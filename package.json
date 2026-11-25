@@ -15,6 +15,7 @@
   ],
   "scripts": {
     "build": "tsc && chmod +x dist/cli.js",
+    "test": "npm run build && node --test",
     "dev": "tsc --watch",
     "prepublishOnly": "npm run build",
     "postinstall": "node scripts/postinstall.js",

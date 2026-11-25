@@ -1,11 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { LOCKEDOUT_HOME, USAGE_FILE } from "./paths.js";
+import { defaultProfile, type ProfilePaths } from "./paths.js";
 
 /**
- * Action log + cooldown tracker. Persisted to ~/.lockedout/usage.json.
+ * Action log + cooldown tracker. Persisted to the selected profile's usage.json.
  *
  * Caps:
- * - First 14 days post-install: 50 actions per UTC day (warm-up period)
+ * - First 14 days of recorded usage: 50 actions per UTC day (warm-up period)
  * - Otherwise: 40 per UTC day (configurable via LOCKEDOUT_DAILY_CAP env var)
  *
  * Cooldown:
@@ -38,10 +38,10 @@ function emptyState(): UsageState {
   };
 }
 
-export function loadUsage(): UsageState {
-  if (!existsSync(USAGE_FILE)) return emptyState();
+export function loadUsage(profile = defaultProfile): UsageState {
+  if (!existsSync(profile.usageFile)) return emptyState();
   try {
-    const raw = readFileSync(USAGE_FILE, "utf-8");
+    const raw = readFileSync(profile.usageFile, "utf-8");
     const parsed = JSON.parse(raw) as Partial<UsageState>;
     return {
       first_run_utc: parsed.first_run_utc ?? new Date().toISOString(),
@@ -53,11 +53,9 @@ export function loadUsage(): UsageState {
   }
 }
 
-export function saveUsage(state: UsageState): void {
-  if (!existsSync(LOCKEDOUT_HOME)) {
-    mkdirSync(LOCKEDOUT_HOME, { recursive: true, mode: 0o700 });
-  }
-  writeFileSync(USAGE_FILE, JSON.stringify(state, null, 2), { mode: 0o600 });
+export function saveUsage(state: UsageState, profile = defaultProfile): void {
+  mkdirSync(profile.stateDir, { recursive: true, mode: 0o700 });
+  writeFileSync(profile.usageFile, JSON.stringify(state, null, 2), { mode: 0o600 });
 }
 
 function utcDay(iso: string): string {
@@ -93,8 +91,11 @@ export interface QuotaCheckResult {
 }
 
 /** Returns whether a counted action would exceed the daily cap. */
-export function checkDailyQuota(opts: { force?: boolean } = {}): QuotaCheckResult {
-  const state = loadUsage();
+export function checkDailyQuota(
+  opts: { force?: boolean } = {},
+  profile: ProfilePaths = defaultProfile,
+): QuotaCheckResult {
+  const state = loadUsage(profile);
   const count = todayActions(state);
   const cap = currentCap(state);
   const firstRun = new Date(state.first_run_utc).getTime();
@@ -115,8 +116,8 @@ export function checkDailyQuota(opts: { force?: boolean } = {}): QuotaCheckResul
   };
 }
 
-export function recordAction(kind: string, target?: string): void {
-  const state = loadUsage();
+export function recordAction(kind: string, target?: string, profile = defaultProfile): void {
+  const state = loadUsage(profile);
   state.actions.push({
     ts: new Date().toISOString(),
     kind,
@@ -125,39 +126,42 @@ export function recordAction(kind: string, target?: string): void {
   // Trim history older than 30 days to keep the file bounded.
   const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
   state.actions = state.actions.filter((a) => new Date(a.ts).getTime() >= cutoff);
-  saveUsage(state);
+  saveUsage(state, profile);
 }
 
 // ─── Cooldown ──────────────────────────────────────────────────────────────
 
-export function setCooldown(minutes = 30): void {
-  const state = loadUsage();
+export function setCooldown(minutes = 30, profile = defaultProfile): void {
+  const state = loadUsage(profile);
   state.cooldown_until = new Date(Date.now() + minutes * 60_000).toISOString();
-  saveUsage(state);
+  saveUsage(state, profile);
 }
 
-export function clearCooldown(): void {
-  const state = loadUsage();
+export function clearCooldown(profile = defaultProfile): void {
+  const state = loadUsage(profile);
   state.cooldown_until = null;
-  saveUsage(state);
+  saveUsage(state, profile);
 }
 
-export function getCooldownRemainingMs(): number {
-  const state = loadUsage();
+function cooldownRemainingMs(state: UsageState): number {
   if (!state.cooldown_until) return 0;
   const ms = new Date(state.cooldown_until).getTime() - Date.now();
   return ms > 0 ? ms : 0;
 }
 
-export function summarizeUsage(): {
+export function getCooldownRemainingMs(profile = defaultProfile): number {
+  return cooldownRemainingMs(loadUsage(profile));
+}
+
+export function summarizeUsage(profile = defaultProfile): {
   first_run_utc: string;
   today_count: number;
   cap: number;
   is_warmup: boolean;
   cooldown_remaining_minutes: number;
 } {
-  const state = loadUsage();
-  const remainingMs = getCooldownRemainingMs();
+  const state = loadUsage(profile);
+  const remainingMs = cooldownRemainingMs(state);
   return {
     first_run_utc: state.first_run_utc,
     today_count: todayActions(state),

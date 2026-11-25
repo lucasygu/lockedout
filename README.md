@@ -20,7 +20,7 @@ Requires Node.js >= 22. Supports **macOS, Linux, Windows**.
 
 > **First run note.** The first `lockedout login` downloads ~150 MB of Chromium into the shared Patchright/Playwright cache (`~/Library/Caches/ms-playwright/` on macOS, `~/.cache/ms-playwright/` on Linux). It's a one-time cost — subsequent runs are instant. Already have Playwright installed? It'll be a no-op; we share the cache.
 
-After installing, run `lockedout login` to sign in (2FA / captcha OK). The CLI persists your session at `~/.lockedout/profile/` so you don't have to log in again until LinkedIn flags it.
+After installing, run `lockedout login` to sign in (2FA / captcha OK). The CLI persists your default session at `~/.lockedout/profile/` so you don't have to log in again until LinkedIn flags it.
 
 ## Why this exists
 
@@ -63,16 +63,39 @@ lockedout cooldown clear
 
 | Command | Description |
 |---|---|
-| `login` | Open Chromium, sign in to LinkedIn manually. Cookies persist to `~/.lockedout/profile/`. |
+| `login` | Open Chromium and sign in to LinkedIn manually. Save the session to the selected local profile. |
 | `status` | Headless probe that checks if the saved session is still valid. |
-| `logout` | Wipe the local session (`rm -rf ~/.lockedout/`). |
+| `logout` | Wipe the selected local session and its usage history. |
+| `profiles` | List local profiles with saved state. Supports `--json`. |
 | `profile <username>` | Scrape a person profile. Accepts a slug (`satyanadella`) or full URL. |
 | `doctor` | End-to-end self-diagnostic — run this first when something breaks. Supports `--json` and `--quick`. |
 | `usage` | Show today's scrape count, daily cap, and cooldown status. |
 | `cooldown status` | Show remaining cooldown time. |
 | `cooldown clear` | Clear an active cooldown (use only if you're confident it was overcautious). |
 
-### Profile options
+### Multiple local profiles
+
+Use the global `--profile <name>` option to keep separate LinkedIn sessions on the same machine.
+
+```bash
+lockedout --profile work login
+lockedout --profile personal login
+lockedout profiles
+lockedout --profile work status
+lockedout --profile work profile satyanadella --json
+lockedout --profile personal logout
+```
+
+A named profile keeps its Chromium data, cookie file, usage count, and cooldown under
+`~/.lockedout/profiles/<name>/`. Sign in separately for each name. Profile names start
+with a lowercase letter or digit and can contain up to 64 lowercase letters, digits,
+hyphens, or underscores. System-reserved device names are excluded.
+
+Commands without `--profile` use `default`, which reads your existing session and usage
+history in `~/.lockedout/`. Both `lockedout logout` and
+`lockedout --profile default logout` clear only the default profile's files.
+
+### LinkedIn profile command options
 
 | Option | Description | Default |
 |---|---|---|
@@ -107,7 +130,7 @@ lockedout cooldown clear
 | Layer | What we use | Why |
 |---|---|---|
 | Browser | [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright) — stealth-patched Playwright fork | Removes `--enable-automation`, adds `--disable-blink-features=AutomationControlled`, blocks `Runtime.enable` / `Console.enable` leaks. Necessary but not sufficient — see below. |
-| Session | Persistent Chromium profile at `~/.lockedout/profile/` | LinkedIn's own JS generates `lidc`, `bcookie`, `bscookie`, `liap`, and the APFC fingerprint header; we don't fake any of it. |
+| Session | Persistent Chromium data for each local profile | LinkedIn's own JS generates `lidc`, `bcookie`, `bscookie`, `liap`, and the APFC fingerprint header; we don't fake any of it. |
 | Chromium | Lazy-downloaded on first `login` | We don't bundle (npm has a 250 MB hard cap; Chromium is 280 MB). We don't postinstall-download (slow, hostile UX). First `login` triggers `npx patchright install chromium`; subsequent runs reuse the shared cache. |
 | Extraction | `innerText` from rendered DOM, not CSS selectors | Resilient to LinkedIn's frequent UI churn. The output is loosely structured text per section, ideal for LLM downstream parsing. |
 | Anti-detection | **Jitter + daily quota + cooldown** | Static fingerprint defeat (Patchright) is necessary but doesn't address behavioral patterns. lockedout adds randomized delays, a 40/day cap, and auto-engaged cooldowns. See [`docs/rate-limiting.md`](docs/rate-limiting.md). |
