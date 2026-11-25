@@ -6,13 +6,13 @@
  * Usage:
  *   lockedout login                     # Headed Chromium, 5-min window for 2FA/captcha
  *   lockedout status [--json]           # Verify the persistent session is alive
- *   lockedout logout                    # Clear ~/.lockedout/
+ *   lockedout logout                    # Clear the selected local session
  *   lockedout profile <user> [opts]     # Scrape a profile via innerText
  */
 
-import { Command } from "commander";
+import { Command, InvalidArgumentError, Option } from "commander";
 import kleur from "kleur";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { BrowserManager, withBrowser } from "./lib/browser.js";
@@ -21,7 +21,14 @@ import { ensureChromium } from "./lib/install.js";
 import { renderDoctorReport, runDoctor } from "./lib/doctor.js";
 import { LinkedInExtractor } from "./lib/extractor.js";
 import { parsePersonSections, PERSON_SECTIONS } from "./lib/fields.js";
-import { LOCKEDOUT_HOME, PROFILE_DIR } from "./lib/paths.js";
+import {
+  commandForProfile,
+  defaultProfile,
+  getProfilePaths,
+  listProfiles,
+  removeProfile,
+  type ProfilePaths,
+} from "./lib/paths.js";
 import { AuthenticationError, RateLimitError, isOffHoursLocal } from "./lib/utils.js";
 import {
   checkDailyQuota,
@@ -39,7 +46,22 @@ const program = new Command();
 program
   .name("lockedout")
   .description("LinkedIn from the command line — via a persistent stealth browser session.")
-  .version(pkg.version);
+  .version(pkg.version)
+  .addOption(
+    new Option("--profile <name>", "Local browser and usage profile to use")
+      .default(defaultProfile, defaultProfile.name)
+      .argParser((name) => {
+        try {
+          return getProfilePaths(name);
+        } catch (err) {
+          throw new InvalidArgumentError((err as Error).message);
+        }
+      }),
+  );
+
+function selectedProfile(): ProfilePaths {
+  return program.opts<{ profile: ProfilePaths }>().profile;
+}
 
 function output(data: unknown, json: boolean): void {
   if (json) console.log(JSON.stringify(data, null, 2));
@@ -48,13 +70,13 @@ function output(data: unknown, json: boolean): void {
 
 function handleError(err: unknown): never {
   if (err instanceof AuthenticationError || err instanceof RateLimitError) {
-    setCooldown(30);
+    const profile = selectedProfile();
+    setCooldown(30, profile);
     const label = err instanceof AuthenticationError ? "Auth" : "Rate limit";
     const color = err instanceof AuthenticationError ? kleur.red : kleur.yellow;
+    const clear = commandForProfile(profile, "cooldown clear");
     console.error(color(`${label}: ${err.message}`));
-    console.error(
-      kleur.dim("Cooldown enabled (30 min). Override with: lockedout cooldown clear"),
-    );
+    console.error(kleur.dim(`Cooldown enabled (30 min). Override with: ${clear}`));
   } else if (err instanceof Error) {
     console.error(kleur.red(`Error: ${err.message}`));
   } else {
@@ -64,13 +86,13 @@ function handleError(err: unknown): never {
 }
 
 /** Refuse to run scrape commands while a cooldown is active. */
-function preflight(): void {
-  const remaining = getCooldownRemainingMs();
+function preflight(profile: ProfilePaths): void {
+  const remaining = getCooldownRemainingMs(profile);
   if (remaining <= 0) return;
   const mins = Math.ceil(remaining / 60_000);
   console.error(
     kleur.yellow(`Cooldown active: ${mins} min remaining.`),
-    kleur.dim("Run: lockedout cooldown clear"),
+    kleur.dim(`Run: ${commandForProfile(profile, "cooldown clear")}`),
   );
   process.exit(1);
 }
@@ -97,6 +119,7 @@ program
   .command("login")
   .description("Open a Chromium window and sign in to LinkedIn manually (cookies persist).")
   .action(async () => {
+    const profile = selectedProfile();
     try {
       warnIfOffHours();
       await ensureChromium();
@@ -109,9 +132,9 @@ program
             waitUntil: "domcontentloaded",
           });
           await waitForManualLogin(page);
-          console.log(kleur.green("✓ Logged in. Session saved to ~/.lockedout/profile/"));
+          console.log(kleur.green(`✓ Logged in. Session saved to ${profile.browserDir}`));
         },
-        { headless: false, warmUp: true },
+        { headless: false, warmUp: true, profile },
       );
     } catch (err) {
       handleError(err);
@@ -125,8 +148,12 @@ program
   .description("Check whether the local session is still logged in.")
   .option("--json", "Output as JSON")
   .action(async (opts) => {
-    if (!existsSync(PROFILE_DIR)) {
-      const out = { logged_in: false, message: "No profile yet. Run: lockedout login" };
+    const profile = selectedProfile();
+    if (!existsSync(profile.browserDir)) {
+      const out = {
+        logged_in: false,
+        message: `No profile yet. Run: ${commandForProfile(profile, "login")}`,
+      };
       if (opts.json) output(out, true);
       else console.log(kleur.yellow(out.message));
       process.exit(1);
@@ -142,7 +169,7 @@ program
           const ok = await isLoggedIn(page);
           return { logged_in: ok, url: page.url() };
         },
-        { headless: true },
+        { headless: true, profile },
       );
       if (opts.json) {
         output(result, true);
@@ -164,14 +191,24 @@ program
 
 program
   .command("logout")
-  .description("Delete the local session (clears ~/.lockedout/).")
-  .action(async () => {
-    if (!existsSync(LOCKEDOUT_HOME)) {
+  .description("Delete the selected local session and its usage history.")
+  .action(() => {
+    const profile = selectedProfile();
+    if (!removeProfile(profile)) {
       console.log(kleur.dim("Already logged out."));
       return;
     }
-    rmSync(LOCKEDOUT_HOME, { recursive: true, force: true });
-    console.log(kleur.green("✓ Cleared ~/.lockedout/"));
+    console.log(kleur.green(`✓ Cleared profile '${profile.name}'.`));
+  });
+
+program
+  .command("profiles")
+  .description("List local profiles with saved state.")
+  .option("--json", "Output as JSON")
+  .action((opts) => {
+    const profiles = listProfiles();
+    if (opts.json) output(profiles, true);
+    else console.log(profiles.length ? profiles.join("\n") : "No local profiles yet.");
   });
 
 // ─── profile ────────────────────────────────────────────────────────────────
@@ -193,8 +230,9 @@ const profileCmd = program
   .option("--force", "Bypass the daily quota cap");
 
 profileCmd.action(async (username: string, opts) => {
+  const profile = selectedProfile();
   try {
-    preflight();
+    preflight(profile);
     warnIfOffHours();
     await ensureChromium();
     const slug = normalizeUsername(username);
@@ -203,7 +241,7 @@ profileCmd.action(async (username: string, opts) => {
       process.exit(1);
     }
 
-    const quota = checkDailyQuota({ force: Boolean(opts.force) });
+    const quota = checkDailyQuota({ force: Boolean(opts.force) }, profile);
     if (quota.blocked) {
       console.error(kleur.yellow(quota.reason!));
       process.exit(1);
@@ -216,7 +254,7 @@ profileCmd.action(async (username: string, opts) => {
       );
     }
 
-    recordAction("profile", slug);
+    recordAction("profile", slug, profile);
 
     const result = await withBrowser(
       async (page) => {
@@ -227,7 +265,7 @@ profileCmd.action(async (username: string, opts) => {
           typeof opts.maxScrolls === "number" ? opts.maxScrolls : null,
         );
       },
-      { headless: true, warmUp: true },
+      { headless: true, warmUp: true, profile },
     );
 
     if (opts.json) {
@@ -263,7 +301,7 @@ program
   .option("--json", "Output as JSON")
   .option("--quick", "Skip the headless session probe (faster, no browser launch)")
   .action(async (opts) => {
-    const report = await runDoctor({ quick: Boolean(opts.quick) });
+    const report = await runDoctor({ quick: Boolean(opts.quick), profile: selectedProfile() });
     if (opts.json) {
       output(report, true);
     } else {
@@ -286,7 +324,7 @@ program
   .description("Show today's scrape count, daily cap, and cooldown status.")
   .option("--json", "Output as JSON")
   .action((opts) => {
-    const summary = summarizeUsage();
+    const summary = summarizeUsage(selectedProfile());
     if (opts.json) {
       output(summary, true);
       return;
@@ -312,7 +350,7 @@ cooldownCmd
   .command("status")
   .description("Show remaining cooldown time.")
   .action(() => {
-    const ms = getCooldownRemainingMs();
+    const ms = getCooldownRemainingMs(selectedProfile());
     if (ms <= 0) {
       console.log(kleur.green("✓ No active cooldown."));
       return;
@@ -324,7 +362,7 @@ cooldownCmd
   .command("clear")
   .description("Clear an active cooldown (use only if you know it was overcautious).")
   .action(() => {
-    clearCooldown();
+    clearCooldown(selectedProfile());
     console.log(kleur.green("✓ Cooldown cleared."));
   });
 

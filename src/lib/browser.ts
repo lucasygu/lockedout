@@ -1,10 +1,11 @@
 import { mkdirSync, chmodSync, existsSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { chromium, type BrowserContext, type Page } from "patchright";
-import { LOCKEDOUT_HOME, PROFILE_DIR, COOKIES_FILE } from "./paths.js";
+import { defaultProfile, type ProfilePaths } from "./paths.js";
 import { warmUpNavigation } from "./utils.js";
 
 export interface BrowserOptions {
+  profile?: ProfilePaths;
   headless?: boolean;
   slowMo?: number;
   viewport?: { width: number; height: number };
@@ -40,7 +41,7 @@ function secureMkdir(path: string): void {
  * tool for cross-machine bridging, NOT as primary auth.
  */
 export class BrowserManager {
-  private readonly userDataDir: string;
+  private readonly profile: ProfilePaths;
   private readonly headless: boolean;
   private readonly slowMo: number;
   private readonly viewport: { width: number; height: number };
@@ -51,7 +52,7 @@ export class BrowserManager {
   private readonly warmUp: boolean;
 
   constructor(opts: BrowserOptions = {}) {
-    this.userDataDir = PROFILE_DIR;
+    this.profile = opts.profile ?? defaultProfile;
     this.headless = opts.headless ?? true;
     this.slowMo = opts.slowMo ?? 0;
     this.viewport = opts.viewport ?? { width: 1280, height: 720 };
@@ -61,10 +62,10 @@ export class BrowserManager {
 
   async start(): Promise<void> {
     if (this.context) throw new Error("Browser already started. Call close() first.");
-    secureMkdir(LOCKEDOUT_HOME);
-    secureMkdir(this.userDataDir);
+    secureMkdir(this.profile.stateDir);
+    secureMkdir(this.profile.browserDir);
 
-    this.context = await chromium.launchPersistentContext(this.userDataDir, {
+    this.context = await chromium.launchPersistentContext(this.profile.browserDir, {
       headless: this.headless,
       slowMo: this.slowMo,
       viewport: this.viewport,
@@ -103,7 +104,7 @@ export class BrowserManager {
     return this.context;
   }
 
-  async exportCookies(path = COOKIES_FILE): Promise<boolean> {
+  async exportCookies(path = this.profile.cookiesFile): Promise<boolean> {
     if (!this.context) return false;
     try {
       const all = await this.context.cookies();
@@ -125,7 +126,7 @@ export class BrowserManager {
     }
   }
 
-  async importCookies(path = COOKIES_FILE): Promise<boolean> {
+  async importCookies(path = this.profile.cookiesFile): Promise<boolean> {
     if (!this.context) return false;
     if (!existsSync(path)) return false;
     try {

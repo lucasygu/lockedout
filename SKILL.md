@@ -31,6 +31,7 @@ Use the `lockedout` CLI to read LinkedIn profiles, posts, and recent activity fr
 |---|---|
 | First-time sign-in | `lockedout login` |
 | Verify session is alive | `lockedout status --json` |
+| List saved local profiles | `lockedout profiles --json` |
 | Read a profile | `lockedout profile <slug-or-url> --json` |
 | Read with extra sections | `lockedout profile <slug> --sections experience,education --json` |
 | **Triage anything broken** | **`lockedout doctor --json`** |
@@ -40,13 +41,18 @@ Use the `lockedout` CLI to read LinkedIn profiles, posts, and recent activity fr
 
 **Always add `--json` when parsing programmatically.** Without it, output is human-formatted text.
 
+When the user selects a named local profile, pass `--profile <name>` to each command
+for that session. For example, use `lockedout --profile work login`, then
+`lockedout --profile work status --json`. Commands without the option use the
+existing default profile.
+
 ---
 
 ## Commands
 
 ### `login`
 
-Opens a headed Chromium window pointed at LinkedIn's login page. The user signs in manually (2FA, captcha, account chooser all OK). Once they reach the feed, the window closes and cookies persist to `~/.lockedout/profile/`.
+Opens a headed Chromium window pointed at LinkedIn's login page. The user signs in manually (2FA, captcha, account chooser all OK). Once they reach the feed, the window closes and cookies persist in the selected local profile.
 
 - **First run** triggers a one-time ~150 MB Chromium download into the shared Patchright/Playwright cache. Subsequent runs are instant.
 - **Reuse** the same session across runs by simply not running `logout`. Status checks are headless and silent.
@@ -60,7 +66,7 @@ Use this to decide whether to prompt the user for `lockedout login` before a scr
 
 ### `logout`
 
-Removes `~/.lockedout/` (the entire persistent profile + usage log). User will need a fresh `login` to scrape again.
+Removes the selected local profile's browser data, cookie file, and usage log. The user will need a fresh `login` for that profile.
 
 ### `profile <username> [options]`
 

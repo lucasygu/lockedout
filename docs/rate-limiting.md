@@ -55,7 +55,8 @@ export const sleepJitter = (minMs: number, maxMs: number) =>
 
 **Goal:** soft-cap actions per UTC day. Default 40/day (well under the 50–100 free-account threshold). First 14 days after install: 50/day combined actions (the "warm-up period").
 
-**Storage:** `~/.lockedout/usage.json`
+The default profile stores usage in `~/.lockedout/usage.json`. A named profile uses
+`~/.lockedout/profiles/<name>/usage.json`.
 
 ```json
 {
@@ -110,7 +111,7 @@ export function checkDailyQuota(opts: { force?: boolean }): string | null
 
 **Goal:** on the *first* hard signal (`RateLimitError` or `AuthenticationError`), write a 30-min cooldown timestamp. Refuse to run scrape commands until that passes. Forces the user to slow down before LinkedIn escalates from soft signal → 24-72h restriction.
 
-**Storage:** same `~/.lockedout/usage.json`, the `cooldown_until` field.
+The selected profile's `usage.json` stores the cooldown in `cooldown_until`.
 
 **API:**
 
@@ -190,5 +191,4 @@ Defer 6/7/8 from the priority list to v0.3.0 unless they become signal-driven.
 
 - **Proxies / IP rotation.** That's bot infrastructure for commercial scrapers. We're a single-user tool — using your home IP that LinkedIn already associates with you is the *correct* behavior.
 - **CAPTCHA solving.** If LinkedIn shows a captcha, we surface it; we don't try to defeat it.
-- **Account multi-tenancy.** One `~/.lockedout/profile/` per machine. Multi-account is out of scope.
 - **Replacing Patchright stealth with our own.** Patchright maintainer has 6+ years on this; we ride upstream.
